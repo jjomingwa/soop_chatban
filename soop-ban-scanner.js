@@ -44,8 +44,7 @@
     /** 패널 DOM 참조 */
     let panelEl = null;
     let logListEl = null;
-    let toggleTabEl = null;
-    let isPanelVisible = true;
+    let isPanelVisible = false;
 
     // ──────────────────────────────────────────────────────────────
     //  1. 데이터 레이어 — 채금 로그 추가 (UI 와 무관)
@@ -87,8 +86,6 @@
             appendLogItem(entry);
             updateStats();
         }
-        // 패널 상태와 무관하게 탭 뱃지는 항상 갱신
-        updateToggleTabBadge();
     };
 
     // ──────────────────────────────────────────────────────────────
@@ -347,25 +344,26 @@
       }
       #soop-ban-panel .footer-clear:hover { color: #e05c5c; }
 
-      /* ── 재오픈 탭: 패널이 닫혔을 때 화면 오른쪽 가장자리에 표시 ── */
-      #soop-ban-tab {
-        position: fixed; top: 120px; right: 0;
-        background: #13161b; border: 1px solid #2e333d;
-        border-right: none; border-radius: 6px 0 0 6px;
-        padding: 10px 6px; z-index: 2147483646; cursor: pointer;
-        display: flex; flex-direction: column; align-items: center; gap: 6px;
-        transition: background 0.15s;
-        writing-mode: vertical-rl; /* 세로 텍스트 */
-        font-size: 11px; color: #aaa;
-        font-family: 'Malgun Gothic','Apple SD Gothic Neo',sans-serif;
+      /* 채금 스캐너 트리거 아이콘 */
+      .soop-ban-icon {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        cursor: pointer;
+        color: #aaa;
+        transition: color 0.2s, background 0.2s;
+        margin-bottom: 4px;
       }
-      #soop-ban-tab:hover { background: #1e2229; color: #fff; }
-      #soop-ban-tab.tab-hidden { display: none; }
-      #soop-ban-tab .tab-badge {
-        writing-mode: horizontal-tb;
-        background: #c0392b; color: #fff; font-size: 10px; font-weight: 700;
-        min-width: 18px; height: 18px; border-radius: 9px; padding: 0 4px;
-        display: flex; align-items: center; justify-content: center;
+      .soop-ban-icon:hover {
+        color: #e05c5c;
+        background: rgba(224, 92, 92, 0.12);
+      }
+      /* 패널이 열려있을 때 강조 */
+      .soop-ban-icon.active {
+        color: #e05c5c;
       }
 
       @keyframes ssFadeIn {
@@ -383,6 +381,7 @@
     const createPanel = () => {
         panelEl = document.createElement('div');
         panelEl.id = 'soop-ban-panel';
+        panelEl.classList.add('hidden'); // 처음엔 숨김
         panelEl.innerHTML = `
       <div class="s-header" id="soop-ban-drag">
         <div class="s-title">
@@ -425,18 +424,10 @@
         document.body.appendChild(panelEl);
         logListEl = document.getElementById('soop-ban-list');
 
-        // ── 재오픈 탭 ──
-        toggleTabEl = document.createElement('div');
-        toggleTabEl.id = 'soop-ban-tab';
-        toggleTabEl.classList.add('tab-hidden'); // 처음엔 숨김 (패널이 열려있으니)
-        toggleTabEl.innerHTML = `🚨 채금 로그 <span class="tab-badge" id="soop-tab-badge">0</span>`;
-        document.body.appendChild(toggleTabEl);
-
         // ── 이벤트 ──
         document.getElementById('soop-ban-minimize').addEventListener('click', toggleMinimize);
         document.getElementById('soop-ban-close').addEventListener('click', closePanel);
         document.getElementById('soop-ban-clear').addEventListener('click', clearLogs);
-        toggleTabEl.addEventListener('click', openPanel);
         makeDraggable(panelEl, document.getElementById('soop-ban-drag'));
 
         // 패널 생성 전에 이미 쌓인 로그 있으면 즉시 렌더링
@@ -504,12 +495,6 @@
         el('stat-etc').textContent = stats.etc;
     };
 
-    /** 패널이 닫혀있어도 탭의 누적 건수는 항상 갱신 */
-    const updateToggleTabBadge = () => {
-        const badge = document.getElementById('soop-tab-badge');
-        if (badge) badge.textContent = stats.total;
-    };
-
     // ──────────────────────────────────────────────────────────────
     //  9. UI — 패널 열기/닫기/최소화
     // ──────────────────────────────────────────────────────────────
@@ -518,8 +503,7 @@
     const closePanel = () => {
         isPanelVisible = false;
         panelEl.classList.add('hidden');
-        toggleTabEl.classList.remove('tab-hidden'); // 재오픈 탭 표시
-        updateToggleTabBadge();
+        document.getElementById('soop-ban-trigger-icon')?.classList.remove('active');
         console.log('[채금스캐너] 패널 숨김. 데이터 수집은 계속됩니다.');
     };
 
@@ -527,7 +511,7 @@
     const openPanel = () => {
         isPanelVisible = true;
         panelEl.classList.remove('hidden');
-        toggleTabEl.classList.add('tab-hidden'); // 재오픈 탭 숨김
+        document.getElementById('soop-ban-trigger-icon')?.classList.add('active');
         renderAllLogs(); // ← 누적된 전체 내역 일괄 표시
         updateStats();
         console.log('[채금스캐너] 패널 열림. 누적 내역 렌더링 완료.');
@@ -548,11 +532,73 @@
         stats.total = stats.spam = stats.abuse = stats.etc = 0;
         if (logListEl) logListEl.innerHTML = '<div class="s-empty">채금 내역이 없습니다</div>';
         updateStats();
-        updateToggleTabBadge();
     };
 
     // ──────────────────────────────────────────────────────────────
-    //  10. UI — 드래그 이동
+    //  10. UI — 트리거 아이콘
+    // ──────────────────────────────────────────────────────────────
+
+    const injectTriggerIcon = () => {
+        const CONTAINER_SEL = '#chatbox > div.chatting-item-wrap';
+        const HEART_SEL     = 'div.chat-icon.highlight-icon.highlight';
+        const ICON_ID       = 'soop-ban-trigger-icon';
+
+        const doInject = () => {
+            // 이미 삽입된 경우 중복 방지
+            if (document.getElementById(ICON_ID)) return;
+
+            const container = document.querySelector(CONTAINER_SEL);
+            if (!container) return;
+
+            const heartEl = container.querySelector(HEART_SEL);
+            if (!heartEl) return;
+
+            // 아이콘 요소 생성 (기존 chat-icon 패턴과 동일한 구조)
+            const icon = document.createElement('div');
+            icon.id = ICON_ID;
+            icon.className = 'chat-icon soop-ban-icon';
+            icon.title = '채금 스캐너 열기/닫기';
+            icon.innerHTML = `
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+                   width="20" height="20" fill="currentColor">
+                <!-- 🚫 금지 아이콘 -->
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10
+                         10-4.48 10-10S17.52 2 12 2zm-1 15v-4H7l5-8v4h4l-5 8z"/>
+              </svg>
+            `;
+
+            // 하트 아이콘 바로 앞에 삽입
+            container.insertBefore(icon, heartEl);
+
+            // 클릭 시 패널 토글
+            icon.addEventListener('click', () => {
+                if (isPanelVisible) {
+                    closePanel();
+                } else {
+                    openPanel();
+                }
+            });
+
+            console.log('[채금스캐너] 트리거 아이콘 삽입 완료');
+        };
+
+        // DOM이 이미 있으면 즉시 삽입 시도
+        doInject();
+
+        // SPA 특성상 chatbox가 나중에 생성될 수 있으므로 MutationObserver로 대기
+        if (!document.getElementById(ICON_ID)) {
+            const observer = new MutationObserver(() => {
+                doInject();
+                if (document.getElementById(ICON_ID)) {
+                    observer.disconnect(); // 삽입 성공 시 감시 종료
+                }
+            });
+            observer.observe(document.body, { childList: true, subtree: true });
+        }
+    };
+
+    // ──────────────────────────────────────────────────────────────
+    //  11. UI — 드래그 이동
     // ──────────────────────────────────────────────────────────────
 
     const makeDraggable = (target, handle) => {
@@ -577,7 +623,7 @@
     };
 
     // ──────────────────────────────────────────────────────────────
-    //  11. 더미 테스트 (Phase 1 검증용 — Phase 2 완성 후 제거)
+    //  12. 더미 테스트 (Phase 1 검증용 — Phase 2 완성 후 제거)
     // ──────────────────────────────────────────────────────────────
 
     const runDummyTest = () => {
@@ -590,7 +636,7 @@
     };
 
     // ──────────────────────────────────────────────────────────────
-    //  12. 초기화
+    //  13. 초기화
     // ──────────────────────────────────────────────────────────────
 
     const init = () => {
@@ -602,6 +648,7 @@
         const buildUI = () => {
             injectStyles();
             createPanel();
+            injectTriggerIcon();
             runDummyTest();
         };
 

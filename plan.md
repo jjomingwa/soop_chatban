@@ -18,7 +18,7 @@
 
 ## 변경 사항
 
-### 1. `isPanelVisible` 초기값 변경
+### 1. `isPanelVisible` 초기값 변경 (완료)
 패널이 처음엔 숨겨진 상태로 시작
 
 ```js
@@ -31,7 +31,7 @@ let isPanelVisible = false;
 
 ---
 
-### 2. [createPanel()](file:///c:/Users/dabin/CodingWorkSpace/soop_chatban/soop-ban-scanner.js#383-447) 수정 — 처음부터 hidden으로 생성
+### 2. [createPanel()](file:///c:/Users/dabin/CodingWorkSpace/soop_chatban/soop-ban-scanner.js#383-447) 수정 — 처음부터 hidden으로 생성 (완료)
 
 ```js
 const createPanel = () => {
@@ -45,7 +45,7 @@ const createPanel = () => {
 
 ---
 
-### 3. `injectTriggerIcon()` 함수 신규 추가
+### 3. `injectTriggerIcon()` 함수 신규 추가 (완료)
 
 트리거 아이콘을 하트 위에 삽입합니다.  
 `#chatbox`가 아직 없을 수 있으므로 `MutationObserver`로 대기합니다.
@@ -113,7 +113,7 @@ const injectTriggerIcon = () => {
 
 ---
 
-### 4. [injectStyles()](file:///c:/Users/dabin/CodingWorkSpace/soop_chatban/soop-ban-scanner.js#248-378) — 아이콘 CSS 추가
+### 4. [injectStyles()](file:///c:/Users/dabin/CodingWorkSpace/soop_chatban/soop-ban-scanner.js#248-378) — 아이콘 CSS 추가 (완료)
 
 기존 `.chat-icon` 스타일에 맞게 추가 (별도 블록으로 추가)
 
@@ -143,7 +143,7 @@ const injectTriggerIcon = () => {
 
 ---
 
-### 5. [closePanel()](file:///c:/Users/dabin/CodingWorkSpace/soop_chatban/soop-ban-scanner.js#517-525) / [openPanel()](file:///c:/Users/dabin/CodingWorkSpace/soop_chatban/soop-ban-scanner.js#526-535) 수정 — 아이콘 active 상태 연동
+### 5. [closePanel()](file:///c:/Users/dabin/CodingWorkSpace/soop_chatban/soop-ban-scanner.js#517-525) / [openPanel()](file:///c:/Users/dabin/CodingWorkSpace/soop_chatban/soop-ban-scanner.js#526-535) 수정 — 아이콘 active 상태 연동 (완료)
 
 ```js
 const closePanel = () => {
@@ -167,7 +167,7 @@ const openPanel = () => {
 
 ---
 
-### 6. [init()](file:///c:/Users/dabin/CodingWorkSpace/soop_chatban/soop-ban-scanner.js#596-616) — `injectTriggerIcon()` 호출 추가
+### 6. [init()](file:///c:/Users/dabin/CodingWorkSpace/soop_chatban/soop-ban-scanner.js#596-616) — `injectTriggerIcon()` 호출 추가 (완료)
 
 ```js
 const buildUI = () => {
@@ -180,7 +180,7 @@ const buildUI = () => {
 
 ---
 
-### 7. 재오픈 탭 (`#soop-ban-tab`) 처리
+### 7. 재오픈 탭 (`#soop-ban-tab`) 처리 (완료)
 트리거 아이콘이 역할을 대신하므로 재오픈 탭은 **제거하거나 뱃지 역할만 유지**.  
 `toggleTabEl` 관련 코드를 삭제하거나 `display:none` 처리.
 
