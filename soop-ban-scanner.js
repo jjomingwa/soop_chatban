@@ -41,6 +41,15 @@
     /** 통계 카운터 */
     const stats = { total: 0, spam: 0, abuse: 0, etc: 0 };
 
+    /** 유저별 최근 채팅 캐시 (최대 10개) */
+    const USER_CHAT_MEMORY = {};
+    const trackUserChat = (nickname, message, time) => {
+        if (!nickname || !message) return;
+        if (!USER_CHAT_MEMORY[nickname]) USER_CHAT_MEMORY[nickname] = [];
+        USER_CHAT_MEMORY[nickname].push({ time, message });
+        if (USER_CHAT_MEMORY[nickname].length > 10) USER_CHAT_MEMORY[nickname].shift();
+    };
+
     /** 패널 DOM 참조 */
     let panelEl = null;
     let logListEl = null;
@@ -59,13 +68,14 @@
      * @param {string} time      발생 시각 문자열
      * @param {string} [source]  'LIVE' 또는 'VOD'
      */
-    const recordBan = (nickname, reason, time, source = 'LIVE') => {
+    const recordBan = (nickname, reason, time, source = 'LIVE', messages = []) => {
         const entry = {
             id: ++logIdCounter,
             nickname,
             reason,
             time,
             source,
+            messages, // 해당 유저의 채팅 히스토리
             timestamp: Date.now(),
         };
 
@@ -162,8 +172,40 @@
     };
 
     // ──────────────────────────────────────────────────────────────
-    //  4. 통신 후킹 — XHR (VOD)
+    //  4. 통신 후킹 — XHR & Fetch (VOD 공통 파서)
     // ──────────────────────────────────────────────────────────────
+
+    const parseVodChatXml = (xmlText) => {
+        try {
+            const parser = new DOMParser();
+            const xml = parser.parseFromString(xmlText, 'text/xml');
+            const chats = xml.querySelectorAll('chat');
+
+            chats.forEach(chat => {
+                const c = chat.querySelector('c')?.textContent || '0';
+                const mt = chat.querySelector('mt')?.textContent || '0';
+                const nick = chat.querySelector('n')?.textContent;
+                const msg = chat.querySelector('m')?.textContent;
+                const time = chat.querySelector('t')?.textContent || nowTime();
+
+                if (c === '0' && mt === '0') {
+                    trackUserChat(nick, msg, time);
+                } else {
+                    const memory = USER_CHAT_MEMORY[nick] ? [...USER_CHAT_MEMORY[nick]] : [];
+                    if (msg && msg.trim().length > 0) memory.push({ time, message: msg });
+
+                    const reasonTag = `시스템 감지 [${c}/${mt}]`;
+                    recordBan(nick || '시스템/알수없음', reasonTag, time, 'VOD', memory);
+
+                    console.warn('[채금스캐너][비정상 채팅 감지]', {
+                        c, mt, nick, msg, time, raw: chat.outerHTML
+                    });
+                }
+            });
+        } catch {
+            // 파싱 실패 또는 XML 포맷이 아님
+        }
+    };
 
     const hookXHR = () => {
         const OriginalOpen = XMLHttpRequest.prototype.open;
@@ -180,30 +222,7 @@
 
             if (isChatUrl) {
                 this.addEventListener('load', () => {
-                    try {
-                        const parser = new DOMParser();
-                        const xml = parser.parseFromString(this.responseText, 'text/xml');
-                        const chats = xml.querySelectorAll('chat');
-
-                        chats.forEach(chat => {
-                            const c = chat.querySelector('c')?.textContent;
-                            const mt = chat.querySelector('mt')?.textContent;
-
-                            // <c> 또는 <mt> 가 0이 아닌 항목 출력 (Phase 2 분석용)
-                            if (c !== '0' || mt !== '0') {
-                                console.warn('[채금스캐너][비정상 채팅 감지]', {
-                                    c, mt,
-                                    nick: chat.querySelector('n')?.textContent,
-                                    msg: chat.querySelector('m')?.textContent,
-                                    user: chat.querySelector('u')?.textContent,
-                                    time: chat.querySelector('t')?.textContent,
-                                    raw: chat.outerHTML,
-                                });
-                            }
-                        });
-                    } catch {
-                        console.log(`[채금스캐너][XHR 수신] ${url}`, this.responseText);
-                    }
+                    parseVodChatXml(this.responseText);
                 });
             }
 
@@ -223,13 +242,13 @@
         window.fetch = async function (input, init) {
             const url = typeof input === 'string' ? input : input?.url || '';
             const isChatUrl = /chat|ChatLoad|BanList|fanticket/i.test(url);
+            
             const response = await originalFetch.apply(this, [input, init]);
 
             if (isChatUrl) {
-                response.clone().json()
-                    .then(data => console.log(`[채금스캐너][Fetch 수신] ${url}`, data))
-                    .catch(() => response.clone().text()
-                        .then(text => console.log(`[채금스캐너][Fetch 텍스트] ${url}`, text)));
+                response.clone().text().then(text => {
+                    parseVodChatXml(text);
+                }).catch(() => { });
             }
 
             return response;
@@ -302,9 +321,13 @@
         text-align: center; color: #444; font-size: 12px; padding: 32px 0;
       }
       #soop-ban-panel .log-item {
-        display: flex; align-items: flex-start; gap: 8px;
+        display: flex; flex-direction: column;
         padding: 8px 12px; border-bottom: 1px solid #1e2229;
         animation: ssFadeIn 0.25s ease;
+        cursor: pointer; /* 클릭 가능하도록 변경 */
+      }
+      #soop-ban-panel .log-wrap {
+        display: flex; align-items: flex-start; gap: 8px; width: 100%;
       }
       #soop-ban-panel .log-item:last-child { border-bottom: none; }
       #soop-ban-panel .log-item:hover { background: #20242d; }
@@ -328,6 +351,19 @@
         background: #e05c5c; flex-shrink: 0;
       }
       #soop-ban-panel .log-time { font-size: 10px; color: #555; margin-top: 3px; }
+      
+      /* 채팅 내역 펼침 UI */
+      #soop-ban-panel .log-detail {
+        display: none; width: 100%; margin-top: 8px; padding-top: 8px;
+        border-top: 1px dashed #3a3f4b;
+      }
+      #soop-ban-panel .log-item.expanded .log-detail { display: block; }
+      #soop-ban-panel .detail-msg {
+        font-size: 11px; color: #aaa; margin-bottom: 4px; line-height: 1.3;
+        word-break: break-word;
+      }
+      #soop-ban-panel .detail-msg span.time { color: #555; margin-right: 4px; font-size: 10px; }
+      #soop-ban-panel .detail-empty { color: #555; font-size: 11px; font-style: italic; }
       #soop-ban-panel .s-footer {
         background: #13161b; padding: 6px 12px; border-top: 1px solid #2e333d;
         display: flex; justify-content: space-between; align-items: center;
@@ -356,6 +392,7 @@
         color: #aaa;
         transition: color 0.2s, background 0.2s;
         margin-bottom: 4px;
+        transform: translateY(-75px); /* 쓰레기통과 하트 아이콘 위로 배치 */
       }
       .soop-ban-icon:hover {
         color: #e05c5c;
@@ -364,6 +401,23 @@
       /* 패널이 열려있을 때 강조 */
       .soop-ban-icon.active {
         color: #e05c5c;
+      }
+      /* VOD 폴백용 강제 플로팅 스타일 */
+      .soop-ban-icon.vod-fallback {
+        position: fixed;
+        right: 20px;
+        bottom: 80px;
+        background: #1e2229;
+        border: 1px solid #3a3f4b;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+        z-index: 2147483647;
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        transform: none; /* 올려친 위치 취소 */
+      }
+      .soop-ban-icon.vod-fallback:hover {
+        background: #2e333d;
       }
 
       @keyframes ssFadeIn {
@@ -452,17 +506,34 @@
         const item = document.createElement('div');
         item.className = 'log-item';
         item.dataset.logId = entry.id;
+
+        const messagesHtml = (entry.messages && entry.messages.length > 0)
+            ? entry.messages.map(m => `<div class="detail-msg"><span class="time">[${m.time}]</span>${escapeHtml(m.message)}</div>`).join('')
+            : '<div class="detail-empty">이전 채팅 기록이 없습니다.</div>';
+
         item.innerHTML = `
-      <div class="log-avatar">${escapeHtml(entry.nickname.charAt(0) || '?')}</div>
-      <div class="log-main">
-        <div class="log-nick">${escapeHtml(entry.nickname)}</div>
-        <div class="log-reason" style="color:${reasonColor}">
-          <span class="reason-dot" style="background:${dotColor}"></span>
-          ${escapeHtml(entry.reason)}
-        </div>
-        <div class="log-time">⏱ ${escapeHtml(entry.time)} · ${entry.source}</div>
-      </div>
-    `;
+          <div class="log-wrap">
+            <div class="log-avatar">${escapeHtml(entry.nickname.charAt(0) || '?')}</div>
+            <div class="log-main">
+              <div class="log-nick">${escapeHtml(entry.nickname)}</div>
+              <div class="log-reason" style="color:${reasonColor}">
+                <span class="reason-dot" style="background:${dotColor}"></span>
+                ${escapeHtml(entry.reason)}
+              </div>
+              <div class="log-time">⏱ ${escapeHtml(entry.time)} · ${entry.source} (클릭하여 채팅 내역 보기)</div>
+            </div>
+          </div>
+          <div class="log-detail">
+            ${messagesHtml}
+          </div>
+        `;
+
+        // 내역 펼침 이벤트 달기
+        item.addEventListener('click', () => {
+            item.classList.toggle('expanded');
+        });
+
+        // 리스트 상단에 삽입
         logListEl.insertBefore(item, logListEl.firstChild);
 
         // 최대 100개 유지
@@ -539,64 +610,74 @@
     // ──────────────────────────────────────────────────────────────
 
     const injectTriggerIcon = () => {
-        const CONTAINER_SEL = '#chatbox > div.chatting-item-wrap';
-        const HEART_SEL     = 'div.chat-icon.highlight-icon.highlight';
-        const ICON_ID       = 'soop-ban-trigger-icon';
+        const ICON_ID = 'soop-ban-trigger-icon';
 
         const doInject = () => {
-            // 이미 삽입된 경우 중복 방지
             if (document.getElementById(ICON_ID)) return;
 
-            const container = document.querySelector(CONTAINER_SEL);
-            if (!container) return;
+            // 라이브 타겟
+            const liveContainer = document.querySelector('#chatbox > div.chatting-item-wrap');
+            const heartEl = liveContainer ? liveContainer.querySelector('div.chat-icon.highlight-icon.highlight') : null;
 
-            const heartEl = container.querySelector(HEART_SEL);
-            if (!heartEl) return;
+            // VOD 타겟 (아프리카 VOD 채팅 컨테이너)
+            const vodContainer = document.querySelector('#chat_area') || document.querySelector('.chat-area') || document.querySelector('#chatbox');
 
-            // 아이콘 요소 생성 (기존 chat-icon 패턴과 동일한 구조)
+            let targetContainer = null;
+            let insertBeforeEl = null;
+            let isVodMode = false;
+
+            if (liveContainer && heartEl) {
+                targetContainer = liveContainer;
+                insertBeforeEl = heartEl;
+            } else if (window.location.hostname.includes('vod.') || vodContainer) {
+                targetContainer = vodContainer || document.body;
+                isVodMode = true;
+            } else {
+                return; // 삽입할 곳을 찾지 못함
+            }
+
             const icon = document.createElement('div');
             icon.id = ICON_ID;
-            icon.className = 'chat-icon soop-ban-icon';
+            // VOD 환경에서는 화면 우측 하단 쪽에 플로팅 버튼처럼 고정되거나 VOD 컨테이너 내부에 맞게 조정
+            icon.className = isVodMode ? 'chat-icon soop-ban-icon vod-fallback' : 'chat-icon soop-ban-icon';
             icon.title = '채금 스캐너 열기/닫기';
             icon.innerHTML = `
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
                    width="20" height="20" fill="currentColor">
-                <!-- 🚫 금지 아이콘 -->
                 <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10
                          10-4.48 10-10S17.52 2 12 2zm-1 15v-4H7l5-8v4h4l-5 8z"/>
               </svg>
             `;
 
-            // 하트 아이콘 바로 앞에 삽입
-            container.insertBefore(icon, heartEl);
+            if (isVodMode && targetContainer === document.body) {
+                // 완전히 찾지 못한 경우 body에 floating
+                targetContainer.appendChild(icon);
+            } else if (insertBeforeEl) {
+                // 라이브 환경 (하트 앞에 삽입)
+                targetContainer.insertBefore(icon, insertBeforeEl);
+            } else {
+                // VOD 환경 (채팅 헤더나 컨테이너 우측 상단에 prepend)
+                targetContainer.appendChild(icon);
+            }
 
-            // 클릭 시 패널 토글
             icon.addEventListener('click', () => {
-                if (isPanelVisible) {
-                    closePanel();
-                } else {
-                    openPanel();
-                }
+                if (isPanelVisible) closePanel();
+                else openPanel();
             });
 
-            console.log('[채금스캐너] 트리거 아이콘 삽입 완료');
+            console.log('[채금스캐너] 트리거 아이콘 삽입 완료 (VOD 폴백: ' + isVodMode + ')');
         };
 
-        // DOM이 이미 있으면 즉시 삽입 시도
         doInject();
 
-        // SPA 특성상 chatbox가 나중에 생성될 수 있으므로 MutationObserver로 대기
         if (!document.getElementById(ICON_ID)) {
             const observer = new MutationObserver(() => {
                 doInject();
-                if (document.getElementById(ICON_ID)) {
-                    observer.disconnect(); // 삽입 성공 시 감시 종료
-                }
+                if (document.getElementById(ICON_ID)) observer.disconnect();
             });
             observer.observe(document.body, { childList: true, subtree: true });
         }
     };
-
     // ──────────────────────────────────────────────────────────────
     //  11. UI — 드래그 이동
     // ──────────────────────────────────────────────────────────────
@@ -629,9 +710,16 @@
     const runDummyTest = () => {
         setTimeout(() => {
             console.log('[채금스캐너] 더미 데이터 테스트 실행');
-            recordBan('테스트유저', '도배', '15:30:22', 'LIVE');
-            recordBan('닉네임예시2', '욕설/비방', '15:31:05', 'LIVE');
-            recordBan('닉네임예시3', '기타 사유', '15:31:58', 'VOD');
+            recordBan('테스트유저', '도배', '15:30:22', 'LIVE', [
+                { time: '15:29:10', message: 'ㅋㅋ' },
+                { time: '15:29:15', message: 'ㅋㅋ' },
+                { time: '15:29:20', message: 'ㅋㅋ' }
+            ]);
+            recordBan('닉네임예시2', '욕설/비방', '15:31:05', 'LIVE', [
+                { time: '15:30:50', message: '방송 재밌게 보다가 갑자기 짜증나게 하네 ㅡㅡ' },
+                { time: '15:31:00', message: '아 개빡치네 진짜' }
+            ]);
+            recordBan('닉네임예시3', '시스템 감지 [1/0]', '15:31:58', 'VOD', []);
         }, 3000);
     };
 
